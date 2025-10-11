@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from browser_use.llm.azure.chat import ChatAzureOpenAI
 from browser_use.llm.google.chat import ChatGoogle
+from browser_use.llm.nvidia.chat import ChatNVIDIA
 from browser_use.llm.openai.chat import ChatOpenAI
 
 if TYPE_CHECKING:
@@ -52,6 +53,9 @@ google_gemini_2_0_pro: 'BaseChatModel'
 google_gemini_2_5_pro: 'BaseChatModel'
 google_gemini_2_5_flash: 'BaseChatModel'
 google_gemini_2_5_flash_lite: 'BaseChatModel'
+
+nvidia_llama_3_3_nemotron_super_49b_v1_5: 'BaseChatModel'
+nvidia_llama_3_3_nemotron_70b_instruct: 'BaseChatModel'
 
 
 def get_llm_by_name(model_name: str):
@@ -108,8 +112,20 @@ def get_llm_by_name(model_name: str):
 		api_key = os.getenv('GOOGLE_API_KEY')
 		return ChatGoogle(model=model, api_key=api_key)
 
+	# NVIDIA Models
+	elif provider == 'nvidia':
+		api_key = os.getenv('NVIDIA_API_KEY')
+		# NVIDIA models use forward slashes, so we need to preserve them
+		model = model_part.replace('_', '-')
+		# Special handling for NVIDIA model naming
+		if 'llama-3-3-nemotron' in model:
+			model = 'nvidia/' + model.replace('-v1-5', '-v1.5')
+		elif model.startswith('llama-') or model.startswith('qwen-'):
+			model = 'nvidia/' + model
+		return ChatNVIDIA(model=model, api_key=api_key)
+
 	else:
-		available_providers = ['openai', 'azure', 'google']
+		available_providers = ['openai', 'azure', 'google', 'nvidia']
 		raise ValueError(f"Unknown provider: '{provider}'. Available providers: {', '.join(available_providers)}")
 
 
@@ -123,6 +139,8 @@ def __getattr__(name: str) -> 'BaseChatModel':
 		return ChatAzureOpenAI  # type: ignore
 	elif name == 'ChatGoogle':
 		return ChatGoogle  # type: ignore
+	elif name == 'ChatNVIDIA':
+		return ChatNVIDIA  # type: ignore
 
 	# Handle model instances - these are the main use case
 	try:
@@ -135,6 +153,7 @@ __all__ = [
 	'ChatOpenAI',
 	'ChatAzureOpenAI',
 	'ChatGoogle',
+	'ChatNVIDIA',
 	'get_llm_by_name',
 	# OpenAI instances - created on demand
 	'openai_gpt_4o',
@@ -168,4 +187,7 @@ __all__ = [
 	'google_gemini_2_5_pro',
 	'google_gemini_2_5_flash',
 	'google_gemini_2_5_flash_lite',
+	# NVIDIA instances - created on demand
+	'nvidia_llama_3_3_nemotron_super_49b_v1_5',
+	'nvidia_llama_3_3_nemotron_70b_instruct',
 ]
