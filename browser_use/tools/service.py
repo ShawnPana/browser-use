@@ -3,7 +3,10 @@ import enum
 import json
 import logging
 import os
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
+
+if TYPE_CHECKING:
+	from browser_use.integrations.onepassword import OnePassword
 
 try:
 	from lmnr import Laminar  # type: ignore
@@ -105,9 +108,11 @@ class Tools(Generic[Context]):
 		exclude_actions: list[str] = [],
 		output_model: type[T] | None = None,
 		display_files_in_done_text: bool = True,
+		onepassword: 'OnePassword | None' = None,
 	):
 		self.registry = Registry[Context](exclude_actions)
 		self.display_files_in_done_text = display_files_in_done_text
+		self.onepassword = onepassword
 
 		"""Register all default browser actions"""
 
@@ -1037,6 +1042,20 @@ You will be given a query and the markdown of a webpage that has been filtered t
 				error_msg = f'Code: {code}\n\nError: {error_msg} Failed to execute JavaScript: {type(e).__name__}: {e}'
 				logger.info(error_msg)
 				return ActionResult(error=error_msg)
+
+		# Register OnePassword actions (they check internally if service is activated)
+		try:
+			from browser_use.integrations.onepassword.actions import register_onepassword_actions
+			import browser_use.integrations.onepassword as op_module
+
+			# If explicit OnePassword instance provided, use it; otherwise use global
+			if self.onepassword:
+				# Store explicit instance globally for actions to use
+				op_module._onepassword_service = self.onepassword.service
+			register_onepassword_actions(self)
+		except ImportError:
+			# onepassword-sdk not installed, skip registration
+			logger.debug('OnePassword integration not available (onepassword-sdk not installed)')
 
 	# Custom done action for structured output
 	@observe_debug(ignore_input=True, ignore_output=True, name='extract_clean_markdown')

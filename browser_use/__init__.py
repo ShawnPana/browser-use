@@ -51,6 +51,7 @@ if TYPE_CHECKING:
 	from browser_use.browser import BrowserProfile, BrowserSession
 	from browser_use.browser import BrowserSession as Browser
 	from browser_use.dom.service import DomService
+	from browser_use.integrations.onepassword import OnePassword
 	from browser_use.llm import models
 	from browser_use.llm.anthropic.chat import ChatAnthropic
 	from browser_use.llm.azure.chat import ChatAzureOpenAI
@@ -81,6 +82,8 @@ _LAZY_IMPORTS = {
 	'Controller': ('browser_use.tools.service', 'Controller'),  # alias
 	# DOM service (moderate weight)
 	'DomService': ('browser_use.dom.service', 'DomService'),
+	# Integrations
+	'OnePassword': ('browser_use.integrations.onepassword', 'OnePassword'),
 	# Chat models (very heavy imports)
 	'ChatOpenAI': ('browser_use.llm.openai.chat', 'ChatOpenAI'),
 	'ChatGoogle': ('browser_use.llm.google.chat', 'ChatGoogle'),
@@ -128,6 +131,8 @@ __all__ = [
 	'ActionResult',
 	'ActionModel',
 	'AgentHistoryList',
+	# Integrations
+	'OnePassword',
 	# Chat models
 	'ChatOpenAI',
 	'ChatGoogle',
