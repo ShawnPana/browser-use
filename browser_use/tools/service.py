@@ -257,18 +257,11 @@ class Tools(Generic[Context]):
 				# Highlight the element being clicked (truly non-blocking)
 				asyncio.create_task(browser_session.highlight_interaction_element(node))
 
-				event = browser_session.event_bus.dispatch(ClickElementEvent(node=node, while_holding_ctrl=params.ctrl or False))
+				event = browser_session.event_bus.dispatch(ClickElementEvent(node=node))
 				await event
 				# Wait for handler to complete and get any exception or metadata
 				click_metadata = await event.event_result(raise_if_any=True, raise_if_none=False)
 				memory = 'Clicked element'
-
-				if params.ctrl:
-					memory += ' and opened in new tab'
-
-				# Check if a new tab was opened (from watchdog metadata)
-				elif isinstance(click_metadata, dict) and click_metadata.get('new_tab_opened'):
-					memory += ' - which opened a new tab'
 
 				msg = f'🖱️ {memory}'
 				logger.info(msg)

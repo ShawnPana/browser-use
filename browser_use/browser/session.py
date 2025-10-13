@@ -730,6 +730,11 @@ class BrowserSession(BaseModel):
 		# switch to the target
 		self.agent_focus = await self.get_or_create_cdp_session(target_id=event.target_id, focus=True)
 
+		# Visually switch to the tab in the browser
+		# The Force Background Tab extension prevents Chrome from auto-switching when links create new tabs,
+		# but we still want the agent to be able to explicitly switch tabs when needed
+		await self.agent_focus.cdp_client.send.Target.activateTarget(params={'targetId': event.target_id})
+
 		# dispatch focus changed event
 		await self.event_bus.dispatch(
 			AgentFocusChangedEvent(
@@ -764,6 +769,9 @@ class BrowserSession(BaseModel):
 
 	async def on_TabCreatedEvent(self, event: TabCreatedEvent) -> None:
 		"""Handle tab creation - apply viewport settings to new tab."""
+		# Note: Tab switching prevention is handled by the Force Background Tab extension
+		# The extension automatically keeps focus on the current tab when new tabs are created
+
 		# Apply viewport settings if configured
 		if self.browser_profile.viewport and not self.browser_profile.no_viewport:
 			try:
@@ -1326,7 +1334,7 @@ class BrowserSession(BaseModel):
 			assert self._cdp_client_root is not None
 			await self._cdp_client_root.start()
 			await self._cdp_client_root.send.Target.setAutoAttach(
-				params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True}
+				params={'autoAttach': False, 'waitForDebuggerOnStart': False, 'flatten': True}
 			)
 			self.logger.debug('CDP client connected successfully')
 
