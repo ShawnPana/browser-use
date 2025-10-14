@@ -1818,12 +1818,20 @@ class Agent(Generic[Context, AgentStructuredOutput]):
 
 			# Save initial actions to history as step 0 for rerun capability
 			# Skip browser state capture for initial actions (usually just URL navigation)
-			model_output = self.AgentOutput(
-				evaluation_previous_goal='Starting agent with initial actions',
-				memory='',
-				next_goal='Execute initial navigation or setup actions',
-				action=self.initial_actions,
-			)
+			if self.settings.flash_mode:
+				model_output = self.AgentOutput(
+					evaluation_previous_goal=None,
+					memory='Initial navigation',
+					next_goal=None,
+					action=self.initial_actions,
+				)
+			else:
+				model_output = self.AgentOutput(
+					evaluation_previous_goal='Start',
+					memory=None,
+					next_goal='Initial navigation',
+					action=self.initial_actions,
+				)
 
 			metadata = StepMetadata(
 				step_number=0,
