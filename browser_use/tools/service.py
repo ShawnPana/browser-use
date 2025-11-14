@@ -1252,7 +1252,7 @@ Validated Code (after quote fixing):
 				'Complete task with structured output.',
 				param_model=StructuredOutputAction[output_model],
 			)
-			async def done(params: StructuredOutputAction):
+			async def done(params: StructuredOutputAction, file_system: FileSystem):
 				# Exclude success from the output JSON since it's an internal parameter
 				output_dict = params.data.model_dump()
 
