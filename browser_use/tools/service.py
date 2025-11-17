@@ -51,7 +51,7 @@ from browser_use.tools.views import (
 	SwitchTabAction,
 	UploadFileAction,
 )
-from browser_use.utils import create_task_with_error_handling, time_execution_sync
+from browser_use.utils import create_task_with_error_handling, sanitize_surrogates, time_execution_sync
 
 logger = logging.getLogger(__name__)
 
@@ -741,6 +741,10 @@ You will be given a query and the markdown of a webpage that has been filtered t
 - Do not answer in conversational format - directly output the relevant information or that the information is unavailable.
 </output>
 """.strip()
+
+			# Sanitize surrogates from content to prevent UTF-8 encoding errors
+			content = sanitize_surrogates(content)
+			query = sanitize_surrogates(query)
 
 			prompt = f'<query>\n{query}\n</query>\n\n<content_stats>\n{stats_summary}\n</content_stats>\n\n<webpage_content>\n{content}\n</webpage_content>'
 

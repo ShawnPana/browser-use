@@ -769,6 +769,8 @@ class DomService:
 		# Use current target (None means use current)
 		assert self.browser_session.agent_focus_target_id is not None
 
+		session_id = self.browser_session.id
+
 		# Build DOM tree (includes CDP calls for snapshot, DOM, AX tree)
 		# Note: all_frames is fetched lazily inside get_dom_tree only if cross-origin iframes need it
 		enhanced_dom_tree, dom_tree_timing = await self.get_dom_tree(
@@ -781,8 +783,9 @@ class DomService:
 
 		# Serialize DOM tree for LLM
 		start_serialize = time.time()
+
 		serialized_dom_state, serializer_timing = DOMTreeSerializer(
-			enhanced_dom_tree, previous_cached_state, paint_order_filtering=self.paint_order_filtering
+			enhanced_dom_tree, previous_cached_state, paint_order_filtering=self.paint_order_filtering, session_id=session_id
 		).serialize_accessible_elements()
 		total_serialization_ms = (time.time() - start_serialize) * 1000
 

@@ -733,3 +733,18 @@ def create_task_with_error_handling(
 
 	task.add_done_callback(_handle_task_exception)
 	return task
+
+
+def sanitize_surrogates(text: str) -> str:
+	"""Remove surrogate characters that can't be encoded in UTF-8.
+
+	Surrogate pairs (U+D800 to U+DFFF) are invalid in UTF-8 when unpaired.
+	These often appear in DOM content from mathematical symbols or emojis.
+
+	Args:
+		text: The text to sanitize
+
+	Returns:
+		Text with surrogate characters removed
+	"""
+	return text.encode('utf-8', errors='ignore').decode('utf-8')

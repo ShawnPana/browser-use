@@ -383,8 +383,14 @@ class SessionManager:
 			f'type={target_type}, waitingForDebugger={waiting_for_debugger})'
 		)
 
+		# Defensive check: browser may be shutting down and _cdp_client_root could be None
+		if self.browser_session._cdp_client_root is None:
+			self.logger.debug(
+				f'[SessionManager] Skipping target attach for {target_id[:8]}... - browser shutting down (no CDP client)'
+			)
+			return
+
 		# Enable auto-attach for this session's children (do this FIRST, outside lock)
-		assert self.browser_session._cdp_client_root is not None, 'Root CDP client required'
 		try:
 			await self.browser_session._cdp_client_root.send.Target.setAutoAttach(
 				params={'autoAttach': True, 'waitForDebuggerOnStart': False, 'flatten': True}, session_id=session_id
@@ -603,6 +609,10 @@ class SessionManager:
 				# Set recovery state
 				self._recovery_in_progress = True
 				self._recovery_complete_event = asyncio.Event()
+
+				if self.browser_session._cdp_client_root is None:
+					self.logger.debug('[SessionManager] Skipping focus recovery - browser shutting down (no CDP client)')
+					return
 
 				# Check if another recovery already fixed agent_focus
 				if self.browser_session.agent_focus_target_id and self.browser_session.agent_focus_target_id != crashed_target_id:
