@@ -30,11 +30,22 @@ curl -fsSL https://browser-use.com/cli/install.sh | bash
 
 This interactive installer lets you choose your installation mode and configures everything automatically.
 
+**Sandboxed environments:** If `curl | bash` is blocked, download first then execute:
+```bash
+curl -fsSL https://browser-use.com/cli/install.sh -o /tmp/install.sh
+bash /tmp/install.sh --remote-only
+```
+
 **Installation modes:**
 ```bash
+# Direct pipe (if allowed)
 curl -fsSL https://browser-use.com/cli/install.sh | bash -s -- --remote-only  # Cloud browser only
 curl -fsSL https://browser-use.com/cli/install.sh | bash -s -- --local-only   # Local browser only
 curl -fsSL https://browser-use.com/cli/install.sh | bash -s -- --full         # All modes
+
+# Download first (for sandboxed environments)
+curl -fsSL https://browser-use.com/cli/install.sh -o /tmp/install.sh
+bash /tmp/install.sh --remote-only  # or --local-only, --full
 ```
 
 | Install Mode | Available Browsers | Default | Use Case |
