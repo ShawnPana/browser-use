@@ -4,6 +4,7 @@ These tests call real functions without mocking. They verify the
 structure and logic of the setup command against actual system state.
 """
 
+from browser_use.skill_cli.checks import CheckResult, CheckStatus
 from browser_use.skill_cli.commands import setup
 
 
@@ -91,59 +92,60 @@ async def test_setup_invalid_mode():
 
 
 async def test_run_checks_local():
-	"""Test run_checks returns expected structure for local mode."""
+	"""Test run_checks returns CheckResult list for local mode."""
 	checks = await setup.run_checks('local')
 
-	assert isinstance(checks, dict)
-	assert 'browser_use_package' in checks
-	assert checks['browser_use_package']['status'] in ('ok', 'error')
+	assert isinstance(checks, list)
+	assert all(isinstance(c, CheckResult) for c in checks)
 
-	# Local mode should check browser
-	assert 'browser' in checks
-	assert checks['browser']['status'] in ('ok', 'error')
+	names = [c.name for c in checks]
+	# Local mode should check package and browser
+	assert 'package' in names
+	assert 'browser' in names
 
 	# Local mode should NOT check api_key or cloudflared
-	assert 'api_key' not in checks
-	assert 'cloudflared' not in checks
+	assert 'api_key' not in names
+	assert 'cloudflared' not in names
 
 
 async def test_run_checks_remote():
-	"""Test run_checks returns expected structure for remote mode."""
+	"""Test run_checks returns CheckResult list for remote mode."""
 	checks = await setup.run_checks('remote')
 
-	assert isinstance(checks, dict)
-	assert 'browser_use_package' in checks
+	assert isinstance(checks, list)
+	names = [c.name for c in checks]
 
 	# Remote mode should check api_key and cloudflared
-	assert 'api_key' in checks
-	assert checks['api_key']['status'] in ('ok', 'missing')
-	assert 'cloudflared' in checks
-	assert checks['cloudflared']['status'] in ('ok', 'missing')
+	assert 'package' in names
+	assert 'api_key' in names
+	assert 'cloudflared' in names
 
 	# Remote mode should NOT check browser
-	assert 'browser' not in checks
+	assert 'browser' not in names
 
 
 async def test_run_checks_full():
-	"""Test run_checks returns expected structure for full mode."""
+	"""Test run_checks returns CheckResult list for full mode."""
 	checks = await setup.run_checks('full')
 
-	assert isinstance(checks, dict)
+	assert isinstance(checks, list)
+	names = [c.name for c in checks]
+
 	# Full mode should check everything
-	assert 'browser_use_package' in checks
-	assert 'browser' in checks
-	assert 'api_key' in checks
-	assert 'cloudflared' in checks
+	assert 'package' in names
+	assert 'browser' in names
+	assert 'api_key' in names
+	assert 'cloudflared' in names
 
 
 def test_plan_actions_no_actions_needed():
 	"""Test plan_actions when everything is ok."""
-	checks = {
-		'browser_use_package': {'status': 'ok'},
-		'browser': {'status': 'ok'},
-		'api_key': {'status': 'ok'},
-		'cloudflared': {'status': 'ok'},
-	}
+	checks = [
+		CheckResult(name='package', status=CheckStatus.OK, message='ok'),
+		CheckResult(name='browser', status=CheckStatus.OK, message='ok'),
+		CheckResult(name='api_key', status=CheckStatus.OK, message='ok'),
+		CheckResult(name='cloudflared', status=CheckStatus.OK, message='ok'),
+	]
 
 	actions = setup.plan_actions(checks, 'local', yes=False, api_key=None)
 	assert actions == []
@@ -151,10 +153,10 @@ def test_plan_actions_no_actions_needed():
 
 def test_plan_actions_install_browser():
 	"""Test plan_actions when browser needs installation."""
-	checks = {
-		'browser_use_package': {'status': 'ok'},
-		'browser': {'status': 'error'},
-	}
+	checks = [
+		CheckResult(name='package', status=CheckStatus.OK, message='ok'),
+		CheckResult(name='browser', status=CheckStatus.ERROR, message='not found'),
+	]
 
 	actions = setup.plan_actions(checks, 'local', yes=False, api_key=None)
 	assert any(a['type'] == 'install_browser' for a in actions)
@@ -162,19 +164,30 @@ def test_plan_actions_install_browser():
 
 def test_plan_actions_configure_api_key():
 	"""Test plan_actions when API key is provided."""
-	checks = {
-		'api_key': {'status': 'missing'},
-	}
+	checks = [
+		CheckResult(name='api_key', status=CheckStatus.ERROR, message='missing'),
+	]
 
 	actions = setup.plan_actions(checks, 'remote', yes=True, api_key='test_key')
 	assert any(a['type'] == 'configure_api_key' for a in actions)
 
 
+def test_plan_actions_always_saves_provided_api_key():
+	"""Test plan_actions always plans configure_api_key when --api-key is provided,
+	even if the existing key is already ok (fixes overwrite bug)."""
+	checks = [
+		CheckResult(name='api_key', status=CheckStatus.OK, message='configured'),
+	]
+
+	actions = setup.plan_actions(checks, 'remote', yes=True, api_key='new_key')
+	assert any(a['type'] == 'configure_api_key' for a in actions)
+
+
 def test_plan_actions_prompt_api_key():
 	"""Test plan_actions prompts for API key when missing and not --yes."""
-	checks = {
-		'api_key': {'status': 'missing'},
-	}
+	checks = [
+		CheckResult(name='api_key', status=CheckStatus.ERROR, message='missing'),
+	]
 
 	actions = setup.plan_actions(checks, 'remote', yes=False, api_key=None)
 	assert any(a['type'] == 'prompt_api_key' for a in actions)
@@ -182,42 +195,32 @@ def test_plan_actions_prompt_api_key():
 
 def test_plan_actions_install_cloudflared():
 	"""Test plan_actions when cloudflared is missing."""
-	checks = {
-		'cloudflared': {'status': 'missing'},
-	}
+	checks = [
+		CheckResult(name='cloudflared', status=CheckStatus.WARNING, message='not installed'),
+	]
 
 	actions = setup.plan_actions(checks, 'remote', yes=True, api_key=None)
 	assert any(a['type'] == 'install_cloudflared' for a in actions)
 
 
-async def test_check_browser():
-	"""Test _check_browser returns valid structure."""
-	result = await setup._check_browser()
-
-	assert isinstance(result, dict)
-	assert 'status' in result
-	assert result['status'] in ('ok', 'error')
-	assert 'message' in result
-
-
 async def test_validate_setup_local():
-	"""Test validate_setup returns expected structure for local mode."""
+	"""Test validate_setup returns CheckResult list for local mode."""
 	results = await setup.validate_setup('local')
 
-	assert isinstance(results, dict)
-	assert 'browser_use_import' in results
-	assert 'browser_available' in results
-	# Should not have remote-only checks
-	assert 'api_key_available' not in results
+	assert isinstance(results, list)
+	assert all(isinstance(r, CheckResult) for r in results)
+	names = [r.name for r in results]
+	assert 'package' in names
+	assert 'browser' in names
 
 
 async def test_validate_setup_remote():
-	"""Test validate_setup returns expected structure for remote mode."""
+	"""Test validate_setup returns CheckResult list for remote mode."""
 	results = await setup.validate_setup('remote')
 
-	assert isinstance(results, dict)
-	assert 'browser_use_import' in results
-	assert 'api_key_available' in results
-	assert 'cloudflared_available' in results
-	# Should not have local-only checks
-	assert 'browser_available' not in results
+	assert isinstance(results, list)
+	assert all(isinstance(r, CheckResult) for r in results)
+	names = [r.name for r in results]
+	assert 'package' in names
+	assert 'api_key' in names
+	assert 'cloudflared' in names

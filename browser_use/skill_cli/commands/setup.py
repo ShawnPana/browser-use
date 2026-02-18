@@ -2,10 +2,14 @@
 
 Handles dependency installation and configuration with mode-based
 setup (local/remote/full) and optional automatic fixes.
+
+Delegates all health checks to skill_cli/checks.py.
 """
 
 import logging
 from typing import Any, Literal
+
+from browser_use.skill_cli.checks import CheckResult, CheckStatus
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +57,8 @@ async def handle(
 		return {
 			'status': 'success',
 			'mode': mode,
-			'checks': checks,
-			'validation': validation,
+			'checks': {r.name: r.model_dump() for r in checks},
+			'validation': {r.name: r.model_dump() for r in validation},
 		}
 
 	except Exception as e:
@@ -65,84 +69,18 @@ async def handle(
 		return {'error': error_msg}
 
 
-async def run_checks(mode: Literal['local', 'remote', 'full']) -> dict[str, Any]:
-	"""Run pre-flight checks without making changes.
+async def run_checks(mode: Literal['local', 'remote', 'full']) -> list[CheckResult]:
+	"""Run pre-flight checks for the given setup mode.
 
-	Returns:
-		Dict mapping check names to their status
+	Delegates to checks.run_checks() with mode filtering.
 	"""
-	checks: dict[str, Any] = {}
+	from browser_use.skill_cli.checks import run_checks as _run_checks
 
-	# Package check
-	try:
-		import browser_use
-
-		checks['browser_use_package'] = {
-			'status': 'ok',
-			'message': f'browser-use {browser_use.__version__}'
-			if hasattr(browser_use, '__version__')
-			else 'browser-use installed',
-		}
-	except ImportError:
-		checks['browser_use_package'] = {
-			'status': 'error',
-			'message': 'browser-use not installed',
-		}
-
-	# Browser check (local and full modes)
-	if mode in ('local', 'full'):
-		checks['browser'] = await _check_browser()
-
-	# API key check (remote and full modes)
-	if mode in ('remote', 'full'):
-		from browser_use.skill_cli.api_key import check_api_key
-
-		api_status = check_api_key()
-		if api_status['available']:
-			checks['api_key'] = {
-				'status': 'ok',
-				'message': f'Configured via {api_status["source"]} ({api_status["key_prefix"]}...)',
-			}
-		else:
-			checks['api_key'] = {
-				'status': 'missing',
-				'message': 'Not configured',
-			}
-
-	# Cloudflared check (remote and full modes)
-	if mode in ('remote', 'full'):
-		from browser_use.skill_cli.tunnel import get_tunnel_manager
-
-		tunnel_mgr = get_tunnel_manager()
-		status = tunnel_mgr.get_status()
-		checks['cloudflared'] = {
-			'status': 'ok' if status['available'] else 'missing',
-			'message': status['note'],
-		}
-
-	return checks
-
-
-async def _check_browser() -> dict[str, Any]:
-	"""Check if browser is available."""
-	try:
-		from browser_use.browser.profile import BrowserProfile
-
-		profile = BrowserProfile(headless=True)
-		# Just check if we can create a session without actually launching
-		return {
-			'status': 'ok',
-			'message': 'Browser available',
-		}
-	except Exception as e:
-		return {
-			'status': 'error',
-			'message': f'Browser check failed: {e}',
-		}
+	return await _run_checks(mode=mode)
 
 
 def plan_actions(
-	checks: dict[str, Any],
+	checks: list[CheckResult],
 	mode: Literal['local', 'remote', 'full'],
 	yes: bool,
 	api_key: str | None,
@@ -154,10 +92,13 @@ def plan_actions(
 	"""
 	actions: list[dict[str, Any]] = []
 
+	# Build a lookup by check name
+	by_name = {r.name: r for r in checks}
+
 	# Browser installation (local/full)
 	if mode in ('local', 'full'):
-		browser_check = checks.get('browser', {})
-		if browser_check.get('status') != 'ok':
+		browser_check = by_name.get('browser')
+		if browser_check and browser_check.status != CheckStatus.OK:
 			actions.append(
 				{
 					'type': 'install_browser',
@@ -167,31 +108,33 @@ def plan_actions(
 			)
 
 	# API key configuration (remote/full)
+	# Always plan configure_api_key when --api-key is provided (fixes overwrite bug)
 	if mode in ('remote', 'full'):
-		api_check = checks.get('api_key', {})
-		if api_check.get('status') != 'ok':
-			if api_key:
-				actions.append(
-					{
-						'type': 'configure_api_key',
-						'description': 'Configure API key',
-						'required': True,
-						'api_key': api_key,
-					}
-				)
-			elif not yes:
-				actions.append(
-					{
-						'type': 'prompt_api_key',
-						'description': 'Prompt for API key',
-						'required': False,
-					}
-				)
+		if api_key:
+			actions.append(
+				{
+					'type': 'configure_api_key',
+					'description': 'Configure API key',
+					'required': True,
+					'api_key': api_key,
+				}
+			)
+		else:
+			api_check = by_name.get('api_key')
+			if api_check and api_check.status != CheckStatus.OK:
+				if not yes:
+					actions.append(
+						{
+							'type': 'prompt_api_key',
+							'description': 'Prompt for API key',
+							'required': False,
+						}
+					)
 
 	# Cloudflared (remote/full)
 	if mode in ('remote', 'full'):
-		cloudflared_check = checks.get('cloudflared', {})
-		if cloudflared_check.get('status') != 'ok':
+		cloudflared_check = by_name.get('cloudflared')
+		if cloudflared_check and cloudflared_check.status != CheckStatus.OK:
 			actions.append(
 				{
 					'type': 'install_cloudflared',
@@ -258,53 +201,25 @@ async def execute_actions(
 
 async def validate_setup(
 	mode: Literal['local', 'remote', 'full'],
-) -> dict[str, Any]:
-	"""Validate that setup worked.
+) -> list[CheckResult]:
+	"""Validate that setup worked by re-running relevant checks.
 
 	Returns:
-		Dict with validation results
+		List of CheckResult from re-running checks
 	"""
-	results: dict[str, Any] = {}
+	from browser_use.skill_cli.checks import run_checks as _run_checks
 
-	# Check imports
-	try:
-		import browser_use  # noqa: F401
-
-		results['browser_use_import'] = 'ok'
-	except ImportError:
-		results['browser_use_import'] = 'failed'
-
-	# Validate mode requirements
-	if mode in ('local', 'full'):
-		try:
-			from browser_use.browser.profile import BrowserProfile
-
-			browser_profile = BrowserProfile(headless=True)
-			results['browser_available'] = 'ok'
-		except Exception as e:
-			results['browser_available'] = f'failed: {e}'
-
-	if mode in ('remote', 'full'):
-		from browser_use.skill_cli.api_key import check_api_key
-		from browser_use.skill_cli.tunnel import get_tunnel_manager
-
-		api_check = check_api_key()
-		results['api_key_available'] = api_check['available']
-
-		tunnel_mgr = get_tunnel_manager()
-		results['cloudflared_available'] = tunnel_mgr.is_available()
-
-	return results
+	return await _run_checks(mode=mode)
 
 
-def _log_checks(checks: dict[str, Any]) -> None:
+def _log_checks(checks: list[CheckResult]) -> None:
 	"""Log check results."""
 	print('\n✓ Running checks...\n')
-	for name, check in checks.items():
-		status = check.get('status', 'unknown')
-		message = check.get('message', '')
-		icon = '✓' if status == 'ok' else '⚠' if status == 'missing' else '✗'
-		print(f'  {icon} {name.replace("_", " ")}: {message}')
+	for check in checks:
+		icon = '✓' if check.status == CheckStatus.OK else '⚠' if check.status == CheckStatus.WARNING else '✗'
+		print(f'  {icon} {check.name.replace("_", " ")}: {check.message}')
+		if check.fix:
+			print(f'      Fix: {check.fix}')
 	print()
 
 
@@ -321,10 +236,10 @@ def _log_actions(actions: list[dict[str, Any]]) -> None:
 	print()
 
 
-def _log_validation(validation: dict[str, Any]) -> None:
+def _log_validation(validation: list[CheckResult]) -> None:
 	"""Log validation results."""
 	print('\n✓ Validation:\n')
-	for name, result in validation.items():
-		icon = '✓' if result == 'ok' else '✗'
-		print(f'  {icon} {name.replace("_", " ")}: {result}')
+	for check in validation:
+		icon = '✓' if check.status == CheckStatus.OK else '✗'
+		print(f'  {icon} {check.name.replace("_", " ")}: {check.message}')
 	print()

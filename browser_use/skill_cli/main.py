@@ -223,30 +223,19 @@ def ensure_server(session: str, browser: str, headed: bool, profile: str | None,
 			sock = connect_to_server(session, timeout=0.5)  # Increased from 0.1s
 			sock.close()
 
-			# Check browser mode matches existing session
-			if meta_path.exists():
-				try:
-					meta = json.loads(meta_path.read_text())
-					existing_mode = meta.get('browser_mode', 'chromium')
-					if existing_mode != browser:
-						# Only error if user explicitly requested 'remote' but session is local
-						# This prevents losing cloud features (live_url, etc.)
-						# The reverse case (requesting local but having remote) is fine -
-						# user still gets a working browser, just with more features
-						if browser == 'remote' and existing_mode != 'remote':
-							print(
-								f"Error: Session '{session}' is running with --browser {existing_mode}, "
-								f'but --browser remote was requested.\n\n'
-								f'Cloud browser features (live_url) require a remote session.\n\n'
-								f'Options:\n'
-								f'  1. Close and restart: browser-use close && browser-use --browser remote open <url>\n'
-								f'  2. Use different session: browser-use --browser remote --session other <command>\n'
-								f'  3. Use existing local browser: browser-use --browser {existing_mode} <command>',
-								file=sys.stderr,
-							)
-							sys.exit(1)
-				except (json.JSONDecodeError, OSError):
-					pass  # Metadata file corrupt, ignore
+			# Check if session config has changed (browser mode, headed, profile, api_key)
+			from browser_use.skill_cli.checks import CheckStatus, check_server_staleness
+
+			staleness = check_server_staleness(session, browser, headed, profile)
+			if staleness.status != CheckStatus.OK:
+				print(
+					f"Error: Session '{session}' was started with different settings.",
+					file=sys.stderr,
+				)
+				changed = staleness.details.get('changed', [])
+				print(f"  Changed: {', '.join(changed)}", file=sys.stderr)
+				print('  Run: browser-use close', file=sys.stderr)
+				sys.exit(1)
 
 			return False  # Already running with correct mode
 		except Exception:
@@ -304,12 +293,22 @@ def ensure_server(session: str, browser: str, headed: bool, profile: str | None,
 				sock.close()
 
 				# Write metadata file to track session config
+				# Resolve api_key for hashing
+				api_key_for_hash = api_key
+				if not api_key_for_hash:
+					api_key_for_hash = os.environ.get('BROWSER_USE_API_KEY')
+				api_key_hash = (
+					hashlib.sha256(api_key_for_hash.encode()).hexdigest()[:16]
+					if api_key_for_hash
+					else None
+				)
 				meta_path.write_text(
 					json.dumps(
 						{
 							'browser_mode': browser,
 							'headed': headed,
 							'profile': profile,
+							'api_key_hash': api_key_hash,
 						}
 					)
 				)
@@ -1060,21 +1059,16 @@ def main() -> int:
 			for name, check in checks.items():
 				status = check.get('status', 'unknown')
 				message = check.get('message', '')
-				note = check.get('note', '')
 				fix = check.get('fix', '')
 
 				if status == 'ok':
 					icon = '✓'
 				elif status == 'warning':
 					icon = '⚠'
-				elif status == 'missing':
-					icon = '○'
 				else:
 					icon = '✗'
 
 				print(f'  {icon} {name}: {message}')
-				if note:
-					print(f'      {note}')
 				if fix:
 					print(f'      Fix: {fix}')
 
